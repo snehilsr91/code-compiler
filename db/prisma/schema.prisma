@@ -1,0 +1,64 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../backend/node_modules/.prisma/client"
+}
+
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -----------------------------
+// Enums
+// -----------------------------
+
+enum Language {
+  JAVASCRIPT
+  PYTHON
+  CPP
+  JAVA
+}
+
+enum SubmissionStatus {
+  PENDING
+  RUNNING
+  ACCEPTED
+  WRONG_ANSWER
+  TIME_LIMIT_EXCEEDED
+  RUNTIME_ERROR
+}
+
+// -----------------------------
+// Models
+// -----------------------------
+
+model User {
+  id          Int          @id @default(autoincrement())
+  name        String
+  email       String       @unique
+  submissions Submission[]
+}
+
+model Problem {
+  id          Int          @id @default(autoincrement())
+  title       String
+  description String
+  testCases   Json
+  submissions Submission[]
+}
+
+model Submission {
+  id         Int               @id @default(autoincrement())
+  code       String
+  language   Language
+  status     SubmissionStatus  @default(PENDING)
+  createdAt  DateTime          @default(now())
+
+  // Relations
+  problemId  Int
+  problem    Problem           @relation(fields: [problemId], references: [id])
+
+  userId     Int
+  user       User              @relation(fields: [userId], references: [id])
+}

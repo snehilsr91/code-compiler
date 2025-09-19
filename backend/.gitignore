@@ -1,0 +1,8 @@
+node_modules
+.env
+
+#testing files
+seed-test-data.js
+test-basic.js
+test-health.js
+test-submit.js

@@ -1,0 +1,38 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node --loader ts-node/esm src/index.ts",
+    "dev": "nodemon --exec \"node --loader ts-node/esm src/index.ts\"",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "postinstall": "prisma generate --schema=../db/prisma/schema.prisma"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@prisma/client": "latest",
+    "body-parser": "latest",
+    "bullmq": "latest",
+    "cors": "latest",
+    "dotenv": "latest",
+    "eslint": "^8.57.0",
+    "express": "latest",
+    "ioredis": "latest"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.35.0",
+    "@types/body-parser": "latest",
+    "@types/cors": "latest",
+    "@types/express": "latest",
+    "@types/node": "latest",
+    "nodemon": "latest",
+    "prisma": "latest",
+    "ts-node": "latest",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "latest"
+  }
+}
