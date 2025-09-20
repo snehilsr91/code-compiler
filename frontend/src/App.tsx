@@ -11,7 +11,7 @@ interface CompilationResult {
 const STARTER_CODE: Record<string, string> = {
   javascript: "console.log('Hello World');",
   python: "print('Hello World')",
-  java: 'public class Main {\n    public static void main(String[] args) {\n        System.out.println("Hello World");\n    }\n}',
+  java: 'class Main {\n    public static void main(String[] args) {\n        System.out.println("Hello World");\n    }\n}',
   c: '#include <stdio.h>\nint main() {\n    printf("Hello World\\n");\n    return 0;\n}',
   cpp: '#include <iostream>\nusing namespace std;\nint main() {\n    cout << "Hello World" << endl;\n    return 0;\n}',
 };
