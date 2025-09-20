@@ -9,7 +9,6 @@ import dotenv from "dotenv";
 import { fileURLToPath } from "url";
 
 dotenv.config();
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -21,62 +20,78 @@ const worker = new Worker(
   "submissions",
   async (job: Job) => {
     const { submissionId, code, language } = job.data;
+    const lang = language.toLowerCase();
 
-    // Temp directory
     const tempDir = path.join(__dirname, "../../tmp");
-    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
+    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
-    const ext = language.toLowerCase() === "javascript" ? "js" : "py"; // extendable
+    let ext = "txt";
+    let dockerImage = "";
+    let compileCmd = "";
+    let runCmd = "";
+
+    if (lang === "javascript") {
+      ext = "js";
+      dockerImage = "node:20-slim";
+      runCmd = `node /app/${submissionId}.${ext}`;
+    } else if (lang === "python") {
+      ext = "py";
+      dockerImage = "python:3.12-slim";
+      runCmd = `python /app/${submissionId}.${ext}`;
+    } else if (lang === "java") {
+      ext = "java";
+      dockerImage = "openjdk:17";
+      compileCmd = `javac /app/${submissionId}.${ext}`;
+      runCmd = `java -cp /app Main`;
+    } else if (lang === "c") {
+      ext = "c";
+      dockerImage = "gcc:latest";
+      compileCmd = `gcc /app/${submissionId}.${ext} -o /app/${submissionId}`;
+      runCmd = `/app/${submissionId}`;
+    } else if (lang === "cpp") {
+      ext = "cpp";
+      dockerImage = "gcc:latest";
+      compileCmd = `g++ /app/${submissionId}.${ext} -o /app/${submissionId}`;
+      runCmd = `/app/${submissionId}`;
+    }
+
     const filePath = path.join(tempDir, `${submissionId}.${ext}`);
+    fs.writeFileSync(filePath, code, "utf8");
 
-    // Write code to temp file
-    fs.writeFileSync(filePath, code, { encoding: "utf8" });
-
-    // Docker image selection
-    const dockerImage =
-      language.toLowerCase() === "javascript"
-        ? "node:20-slim"
-        : "python:3.12-slim";
-
-    // Execute inside Docker
     return new Promise<void>((resolve) => {
-      exec(
-        `docker run --rm -v ${tempDir.replace(
-          /\\/g,
-          "/"
-        )}:/app ${dockerImage} ${
-          language.toLowerCase() === "javascript" ? "node" : "python3"
-        } /app/${submissionId}.${ext}`,
-        { timeout: 5000 },
-        async (error, stdout, stderr) => {
-          let status: SubmissionStatus = SubmissionStatus.ACCEPTED;
-          let output = stdout;
+      const dockerCmd = compileCmd
+        ? `docker run --rm -v ${tempDir.replace(
+            /\\/g,
+            "/"
+          )}:/app ${dockerImage} /bin/sh -c "${compileCmd} && ${runCmd}"`
+        : `docker run --rm -v ${tempDir.replace(
+            /\\/g,
+            "/"
+          )}:/app ${dockerImage} ${runCmd}`;
 
-          if (error) {
-            status = SubmissionStatus.RUNTIME_ERROR;
-            output = stderr || error.message;
-          }
+      exec(dockerCmd, { timeout: 10000 }, async (error, stdout, stderr) => {
+        let status: SubmissionStatus = SubmissionStatus.ACCEPTED;
+        let output = stdout || "";
 
-          // Update submission in DB
-          await prisma.submission.update({
-            where: { id: submissionId },
-            data: { status, code: `${code}\n\n// Output:\n${output}` },
-          });
-
-          // Delete temp file
-          fs.unlinkSync(filePath);
-          resolve();
+        if (error) {
+          status = SubmissionStatus.RUNTIME_ERROR;
+          output = stderr || error.message;
         }
-      );
+
+        await prisma.submission.update({
+          where: { id: submissionId },
+          data: { status, code: `${code}\n\n// Output:\n${output}` },
+        });
+
+        fs.existsSync(filePath) && fs.unlinkSync(filePath);
+        resolve();
+      });
     });
   },
   { connection }
 );
 
-worker.on("completed", (job) => {
-  console.log(`Submission ${job.id} completed`);
-});
-
-worker.on("failed", (job, err) => {
-  console.error(`Submission ${job?.id} failed`, err);
-});
+worker.on("completed", (job) => console.log(`Submission ${job.id} completed`));
+worker.on("failed", (job, err) =>
+  console.error(`Submission ${job?.id} failed`, err)
+);

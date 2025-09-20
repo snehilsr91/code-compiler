@@ -16,7 +16,7 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
     <div className="border rounded-md shadow-md">
       <Editor
         height="400px"
-        defaultLanguage={language}
+        language={language === "cpp" ? "cpp" : language}
         value={value}
         theme="vs-dark"
         onChange={onChange}
@@ -25,6 +25,7 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
           minimap: { enabled: false },
           scrollBeyondLastLine: false,
           wordWrap: "on",
+          automaticLayout: true,
         }}
       />
     </div>
