@@ -1,4 +1,4 @@
-import { exec } from "child_process";
+import { exec, spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
@@ -39,11 +39,7 @@ export async function validateCode(
 
 // ---------------- JavaScript ----------------
 async function validateJavaScript(code: string): Promise<ValidationResult> {
-  const tempDir = path.join(__dirname, "../../tmp");
-  if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
-
-  const tempFile = path.join(tempDir, `code_${Date.now()}.js`);
-  const wrappedCode = `'use strict';
+    const wrappedCode = `'use strict';
 try {
   ${code}
   console.log("__VALIDATION_SUCCESS__");
@@ -51,183 +47,184 @@ try {
   console.error("__VALIDATION_ERROR__", e.name + ": " + e.message);
   process.exit(1);
 }`;
-  fs.writeFileSync(tempFile, wrappedCode, "utf8");
 
   return new Promise((resolve) => {
-    exec(
-      `docker run --rm -v ${tempDir.replace(
-        /\\/g,
-        "/"
-      )}:/app node:20-slim node /app/${path.basename(tempFile)}`,
-      { timeout: 5000 },
-      (error, stdout, stderr) => {
-        fs.unlinkSync(tempFile);
-        const output = stdout + stderr;
+    const child = spawn('docker', ['run', '--rm', '-i', 'node:20-slim', 'node'], { timeout: 5000 });
 
-        if (output.includes("__VALIDATION_ERROR__") || error) {
-          resolve({
-            isValid: false,
-            message: "JavaScript validation failed",
-            errors: [output.trim()],
-          });
-        } else {
-          resolve({
-            isValid: true,
-            message: "JavaScript code is valid",
-          });
-        }
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+
+    child.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    child.on('close', (code) => {
+      const output = stdout + stderr;
+      if (output.includes("__VALIDATION_ERROR__") || code !== 0) {
+        resolve({
+          isValid: false,
+          message: "JavaScript validation failed",
+          errors: [output.trim()],
+        });
+      } else {
+        resolve({
+          isValid: true,
+          message: "JavaScript code is valid",
+        });
       }
-    );
+    });
+
+    child.stdin.write(wrappedCode);
+    child.stdin.end();
   });
 }
 
 // ---------------- Python ----------------
 async function validatePython(code: string): Promise<ValidationResult> {
-  const tempDir = path.join(__dirname, "../../tmp");
-  if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
-
-  const tempFile = path.join(tempDir, `code_${Date.now()}.py`);
-  const wrappedCode = `
+    const wrappedCode = `
+import sys
 try:
     ${code}
     print("__VALIDATION_SUCCESS__")
 except Exception as e:
-    print("__VALIDATION_ERROR__", e)
-    exit(1)
+    print("__VALIDATION_ERROR__", e, file=sys.stderr)
+    sys.exit(1)
 `;
-  fs.writeFileSync(tempFile, wrappedCode, "utf8");
 
   return new Promise((resolve) => {
-    exec(
-      `docker run --rm -v ${tempDir.replace(
-        /\\/g,
-        "/"
-      )}:/app python:3.12-slim python /app/${path.basename(tempFile)}`,
-      { timeout: 5000 },
-      (error, stdout, stderr) => {
-        fs.unlinkSync(tempFile);
-        const output = stdout + stderr;
+    const child = spawn('docker', ['run', '--rm', '-i', 'python:3.12-slim', 'python'], { timeout: 5000 });
 
-        if (output.includes("__VALIDATION_ERROR__") || error) {
-          resolve({
-            isValid: false,
-            message: "Python validation failed",
-            errors: [output.trim()],
-          });
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+
+    child.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    child.on('close', (code) => {
+        const output = stdout + stderr;
+        if (output.includes("__VALIDATION_ERROR__") || code !== 0) {
+            resolve({
+                isValid: false,
+                message: "Python validation failed",
+                errors: [output.trim()],
+            });
         } else {
-          resolve({
-            isValid: true,
-            message: "Python code is valid",
-          });
+            resolve({
+                isValid: true,
+                message: "Python code is valid",
+            });
         }
-      }
-    );
+    });
+
+    child.stdin.write(wrappedCode);
+    child.stdin.end();
   });
 }
 
 // ---------------- Java ----------------
 async function validateJava(code: string): Promise<ValidationResult> {
-  const tempDir = path.join(__dirname, "../../tmp");
-  if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+    // Extract class name from code to match file name, default to "Main"
+    const classNameMatch = code.match(/public\s+class\s+([^{\s]+)/);
+    const className = classNameMatch ? classNameMatch[1] : 'Main';
+    const javaFile = `${className}.java`;
 
-  const tempFile = path.join(tempDir, `Main_${Date.now()}.java`);
-  fs.writeFileSync(tempFile, code, "utf8");
+    // This escaping is for the `sh` inside the container.
+    const escapedCode = code.replace(/'/g, "'\\''");
+    const innerCommand = `echo '${escapedCode}' > ${javaFile} && javac ${javaFile}`;
 
-  return new Promise((resolve) => {
-    exec(
-      `docker run --rm -v ${tempDir.replace(
-        /\\/g,
-        "/"
-      )}:/app openjdk:17 javac /app/${path.basename(tempFile)}`,
-      { timeout: 5000 },
-      (error, stdout, stderr) => {
-        fs.unlinkSync(tempFile);
+    return new Promise((resolve) => {
+        const child = spawn('docker', ['run', '--rm', '-i', 'openjdk:17', 'sh', '-c', innerCommand], { timeout: 5000 });
 
-        if (error) {
-          resolve({
-            isValid: false,
-            message: "Java compilation failed",
-            errors: [stderr || error.message],
-          });
-        } else {
-          resolve({
-            isValid: true,
-            message: "Java code compiled successfully",
-          });
-        }
-      }
-    );
-  });
+        let stderr = '';
+        child.stderr.on('data', (data) => {
+            stderr += data.toString();
+        });
+
+        child.on('close', (code) => {
+            if (code !== 0) {
+                resolve({
+                    isValid: false,
+                    message: "Java compilation failed",
+                    errors: [stderr.trim() || 'Java compilation failed with an unknown error.'],
+                });
+            } else {
+                resolve({
+                    isValid: true,
+                    message: "Java code compiled successfully",
+                });
+            }
+        });
+
+        child.on('error', (err) => {
+            // This handles errors in spawning the process itself
+            resolve({
+                isValid: false,
+                message: "Failed to spawn Docker process.",
+                errors: [err.message],
+            });
+        });
+    });
 }
 
 // ---------------- C ----------------
 async function validateC(code: string): Promise<ValidationResult> {
-  const tempDir = path.join(__dirname, "../../tmp");
-  if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
-
-  const tempFile = path.join(tempDir, `code_${Date.now()}.c`);
-  const outputFile = path.join(tempDir, `out_${Date.now()}`);
-  fs.writeFileSync(tempFile, code, "utf8");
-
   return new Promise((resolve) => {
-    exec(
-      `docker run --rm -v ${tempDir.replace(
-        /\\/g,
-        "/"
-      )}:/app gcc:latest gcc /app/${path.basename(
-        tempFile
-      )} -o /app/${path.basename(outputFile)}`,
-      { timeout: 5000 },
-      (error, stdout, stderr) => {
-        fs.unlinkSync(tempFile);
-        if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile);
+    const child = spawn('docker', ['run', '--rm', '-i', 'gcc:latest', 'gcc', '-x', 'c', '-o', '/dev/null', '-'], { timeout: 5000 });
 
-        if (error) {
-          resolve({
-            isValid: false,
-            message: "C compilation failed",
-            errors: [stderr || error.message],
-          });
-        } else {
-          resolve({ isValid: true, message: "C code compiled successfully" });
-        }
+    let stderr = '';
+    child.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    child.on('close', (code) => {
+      if (code !== 0) {
+        resolve({
+          isValid: false,
+          message: "C compilation failed",
+          errors: [stderr.trim()],
+        });
+      } else {
+        resolve({ isValid: true, message: "C code compiled successfully" });
       }
-    );
+    });
+
+    child.stdin.write(code);
+    child.stdin.end();
   });
 }
 
 // ---------------- C++ ----------------
 async function validateCpp(code: string): Promise<ValidationResult> {
-  const tempDir = path.join(__dirname, "../../tmp");
-  if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+    return new Promise((resolve) => {
+        const child = spawn('docker', ['run', '--rm', '-i', 'gcc:latest', 'g++', '-x', 'c++', '-o', '/dev/null', '-'], { timeout: 5000 });
 
-  const tempFile = path.join(tempDir, `code_${Date.now()}.cpp`);
-  const outputFile = path.join(tempDir, `out_${Date.now()}`);
-  fs.writeFileSync(tempFile, code, "utf8");
+        let stderr = '';
+        child.stderr.on('data', (data) => {
+            stderr += data.toString();
+        });
 
-  return new Promise((resolve) => {
-    exec(
-      `docker run --rm -v ${tempDir.replace(
-        /\\/g,
-        "/"
-      )}:/app gcc:latest g++ /app/${path.basename(
-        tempFile
-      )} -o /app/${path.basename(outputFile)}`,
-      { timeout: 5000 },
-      (error, stdout, stderr) => {
-        fs.unlinkSync(tempFile);
-        if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile);
+        child.on('close', (code) => {
+            if (code !== 0) {
+                resolve({
+                    isValid: false,
+                    message: "C++ compilation failed",
+                    errors: [stderr.trim()],
+                });
+            } else {
+                resolve({ isValid: true, message: "C++ code compiled successfully" });
+            }
+        });
 
-        if (error) {
-          resolve({
-            isValid: false,
-            message: "C++ compilation failed",
-            errors: [stderr || error.message],
-          });
-        } else {
-          resolve({ isValid: true, message: "C++ code compiled successfully" });
-        }
-      }
-    );
-  });
+        child.stdin.write(code);
+        child.stdin.end();
+    });
 }
