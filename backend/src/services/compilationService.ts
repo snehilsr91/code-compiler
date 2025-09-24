@@ -6,6 +6,14 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+export const LANGUAGES = {
+  JAVASCRIPT: "javascript",
+  PYTHON: "python",
+  JAVA: "java",
+  C: "c",
+  CPP: "cpp",
+};
+
 export interface ValidationResult {
   isValid: boolean;
   message: string;
@@ -39,7 +47,7 @@ export async function validateCode(
 
 // ---------------- JavaScript ----------------
 async function validateJavaScript(code: string): Promise<ValidationResult> {
-    const wrappedCode = `'use strict';
+  const wrappedCode = `'use strict';
 try {
   ${code}
   console.log("__VALIDATION_SUCCESS__");
@@ -49,20 +57,24 @@ try {
 }`;
 
   return new Promise((resolve) => {
-    const child = spawn('docker', ['run', '--rm', '-i', 'node:20-slim', 'node'], { timeout: 5000 });
+    const child = spawn(
+      "docker",
+      ["run", "--rm", "-i", "node:20-slim", "node"],
+      { timeout: 5000 }
+    );
 
-    let stdout = '';
-    let stderr = '';
+    let stdout = "";
+    let stderr = "";
 
-    child.stdout.on('data', (data) => {
+    child.stdout.on("data", (data) => {
       stdout += data.toString();
     });
 
-    child.stderr.on('data', (data) => {
+    child.stderr.on("data", (data) => {
       stderr += data.toString();
     });
 
-    child.on('close', (code) => {
+    child.on("close", (code) => {
       const output = stdout + stderr;
       if (output.includes("__VALIDATION_ERROR__") || code !== 0) {
         resolve({
@@ -85,7 +97,7 @@ try {
 
 // ---------------- Python ----------------
 async function validatePython(code: string): Promise<ValidationResult> {
-    const wrappedCode = `
+  const wrappedCode = `
 import sys
 try:
     ${code}
@@ -96,33 +108,37 @@ except Exception as e:
 `;
 
   return new Promise((resolve) => {
-    const child = spawn('docker', ['run', '--rm', '-i', 'python:3.12-slim', 'python'], { timeout: 5000 });
+    const child = spawn(
+      "docker",
+      ["run", "--rm", "-i", "python:3.12-slim", "python"],
+      { timeout: 5000 }
+    );
 
-    let stdout = '';
-    let stderr = '';
+    let stdout = "";
+    let stderr = "";
 
-    child.stdout.on('data', (data) => {
+    child.stdout.on("data", (data) => {
       stdout += data.toString();
     });
 
-    child.stderr.on('data', (data) => {
+    child.stderr.on("data", (data) => {
       stderr += data.toString();
     });
 
-    child.on('close', (code) => {
-        const output = stdout + stderr;
-        if (output.includes("__VALIDATION_ERROR__") || code !== 0) {
-            resolve({
-                isValid: false,
-                message: "Python validation failed",
-                errors: [output.trim()],
-            });
-        } else {
-            resolve({
-                isValid: true,
-                message: "Python code is valid",
-            });
-        }
+    child.on("close", (code) => {
+      const output = stdout + stderr;
+      if (output.includes("__VALIDATION_ERROR__") || code !== 0) {
+        resolve({
+          isValid: false,
+          message: "Python validation failed",
+          errors: [output.trim()],
+        });
+      } else {
+        resolve({
+          isValid: true,
+          message: "Python code is valid",
+        });
+      }
     });
 
     child.stdin.write(wrappedCode);
@@ -132,68 +148,82 @@ except Exception as e:
 
 // ---------------- Java ----------------
 async function validateJava(code: string): Promise<ValidationResult> {
-    // Extract class name from code to match file name, default to "Main"
-    const classNameMatch = code.match(/public\s+class\s+([^{\s]+)/);
-    const className = classNameMatch ? classNameMatch[1] : 'Main';
-    const javaFile = `${className}.java`;
+  const classNameMatch = code.match(/public\s+class\s+([^{\s]+)/);
+  const className = classNameMatch ? classNameMatch[1] : "Main";
+  const javaFile = `${className}.java`;
+  const escapedCode = code.replace(/'/g, "'\\''");
 
-    // This escaping is for the `sh` inside the container.
-    const escapedCode = code.replace(/'/g, "'\\''");
-    const innerCommand = `echo '${escapedCode}' > ${javaFile} && javac ${javaFile}`;
+  const innerCommand = `
+    echo '${escapedCode}' > ${javaFile} && \
+    javac ${javaFile} && \
+    java -Xss8m -cp . ${className}
+  `;
 
-    return new Promise((resolve) => {
-        const child = spawn('docker', ['run', '--rm', '-i', 'openjdk:17', 'sh', '-c', innerCommand], { timeout: 5000 });
+  return new Promise((resolve) => {
+    const child = spawn(
+      "docker",
+      ["run", "--rm", "-i", "openjdk:17", "sh", "-c", innerCommand],
+      { timeout: 5000 }
+    );
 
-        let stderr = '';
-        child.stderr.on('data', (data) => {
-            stderr += data.toString();
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (data) => (stdout += data.toString()));
+    child.stderr.on("data", (data) => (stderr += data.toString()));
+
+    child.on("close", (code) => {
+      if (code !== 0 || stderr) {
+        resolve({
+          isValid: false,
+          message: "Java runtime error",
+          errors: [stderr.trim() || stdout.trim()],
         });
-
-        child.on('close', (code) => {
-            if (code !== 0) {
-                resolve({
-                    isValid: false,
-                    message: "Java compilation failed",
-                    errors: [stderr.trim() || 'Java compilation failed with an unknown error.'],
-                });
-            } else {
-                resolve({
-                    isValid: true,
-                    message: "Java code compiled successfully",
-                });
-            }
+      } else {
+        resolve({
+          isValid: true,
+          message: "Java code executed successfully",
         });
-
-        child.on('error', (err) => {
-            // This handles errors in spawning the process itself
-            resolve({
-                isValid: false,
-                message: "Failed to spawn Docker process.",
-                errors: [err.message],
-            });
-        });
+      }
     });
+  });
 }
 
 // ---------------- C ----------------
 async function validateC(code: string): Promise<ValidationResult> {
   return new Promise((resolve) => {
-    const child = spawn('docker', ['run', '--rm', '-i', 'gcc:latest', 'gcc', '-x', 'c', '-o', '/dev/null', '-'], { timeout: 5000 });
+    const child = spawn(
+      "docker",
+      [
+        "run",
+        "--rm",
+        "-i",
+        "--memory=128m",
+        "--ulimit",
+        "stack=8388608",
+        "gcc:latest",
+        "sh",
+        "-c",
+        `gcc -x c -o /tmp/a.out - && /tmp/a.out`,
+      ],
+      { timeout: 5000 }
+    );
 
-    let stderr = '';
-    child.stderr.on('data', (data) => {
-      stderr += data.toString();
-    });
+    let stdout = "";
+    let stderr = "";
 
-    child.on('close', (code) => {
-      if (code !== 0) {
+    child.stdout.on("data", (data) => (stdout += data.toString()));
+    child.stderr.on("data", (data) => (stderr += data.toString()));
+
+    child.on("close", (code) => {
+      if (code !== 0 || stderr) {
         resolve({
           isValid: false,
-          message: "C compilation failed",
-          errors: [stderr.trim()],
+          message: "C runtime error",
+          errors: [stderr.trim() || stdout.trim()],
         });
       } else {
-        resolve({ isValid: true, message: "C code compiled successfully" });
+        resolve({ isValid: true, message: "C code executed successfully" });
       }
     });
 
@@ -204,27 +234,43 @@ async function validateC(code: string): Promise<ValidationResult> {
 
 // ---------------- C++ ----------------
 async function validateCpp(code: string): Promise<ValidationResult> {
-    return new Promise((resolve) => {
-        const child = spawn('docker', ['run', '--rm', '-i', 'gcc:latest', 'g++', '-x', 'c++', '-o', '/dev/null', '-'], { timeout: 5000 });
+  return new Promise((resolve) => {
+    const child = spawn(
+      "docker",
+      [
+        "run",
+        "--rm",
+        "-i",
+        "--memory=128m",
+        "--ulimit",
+        "stack=8388608",
+        "gcc:latest",
+        "sh",
+        "-c",
+        `g++ -x c++ -o /tmp/a.out - && /tmp/a.out`,
+      ],
+      { timeout: 5000 }
+    );
 
-        let stderr = '';
-        child.stderr.on('data', (data) => {
-            stderr += data.toString();
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (data) => (stdout += data.toString()));
+    child.stderr.on("data", (data) => (stderr += data.toString()));
+
+    child.on("close", (code) => {
+      if (code !== 0 || stderr) {
+        resolve({
+          isValid: false,
+          message: "C runtime error",
+          errors: [stderr.trim() || stdout.trim()],
         });
-
-        child.on('close', (code) => {
-            if (code !== 0) {
-                resolve({
-                    isValid: false,
-                    message: "C++ compilation failed",
-                    errors: [stderr.trim()],
-                });
-            } else {
-                resolve({ isValid: true, message: "C++ code compiled successfully" });
-            }
-        });
-
-        child.stdin.write(code);
-        child.stdin.end();
+      } else {
+        resolve({ isValid: true, message: "C code executed successfully" });
+      }
     });
+
+    child.stdin.write(code);
+    child.stdin.end();
+  });
 }
