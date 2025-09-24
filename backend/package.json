@@ -6,13 +6,15 @@
   "scripts": {
     "start": "node --loader ts-node/esm src/index.ts",
     "dev": "nodemon --exec \"node --loader ts-node/esm src/index.ts\"",
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "postinstall": "prisma generate --schema=../db/prisma/schema.prisma"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "module",
+  "prisma": {
+    "schema": "./prisma/schema.prisma"
+  },
   "dependencies": {
     "@prisma/client": "latest",
     "body-parser": "latest",
