@@ -96,11 +96,17 @@ try {
 }
 
 // ---------------- Python ----------------
-async function validatePython(code: string): Promise<ValidationResult> {
+export async function validatePython(code: string): Promise<ValidationResult> {
+  // Indent user code to fit inside try block
+  const indentedCode = code
+    .split("\n")
+    .map((line) => "    " + line) // 4 spaces indentation
+    .join("\n");
+
   const wrappedCode = `
 import sys
 try:
-    ${code}
+${indentedCode}
     print("__VALIDATION_SUCCESS__")
 except Exception as e:
     print("__VALIDATION_ERROR__", e, file=sys.stderr)
@@ -127,6 +133,7 @@ except Exception as e:
 
     child.on("close", (code) => {
       const output = stdout + stderr;
+
       if (output.includes("__VALIDATION_ERROR__") || code !== 0) {
         resolve({
           isValid: false,
