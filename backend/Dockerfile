@@ -2,17 +2,18 @@ FROM node:20-slim
 
 WORKDIR /app
 
-# Copy package.json and package-lock.json first for caching
+# Copy package.json and package-lock.json
 COPY package*.json ./
 
-# Install dependencies
 RUN npm install
 
-# Copy all backend files
+# Copy source code
 COPY . .
 
-# Expose the port your app listens on
+# Build TypeScript into dist/
+RUN npm run build
+
 EXPOSE 3000
 
-# Start the app
-CMD ["npm", "run", "dev"]
+# Start production server (not nodemon)
+CMD ["npm", "start"]
