@@ -14,13 +14,13 @@ const connection = new IORedis(
 const worker = new Worker(
   "submissions",
   async (job: Job) => {
-    const { submissionId, code, language } = job.data;
+    const { submissionId, code, language, input } = job.data;
 
     try {
       console.log(`Processing submission ${submissionId} for ${language}`);
 
       // Execute the code using the codeExecutor service
-      const result = await executeCode(code, language);
+      const result = await executeCode(code, language, input);
 
       // Map execution result to submission status
       let status: SubmissionStatus;

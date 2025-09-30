@@ -226,8 +226,11 @@ async function executeWithLimits(
       });
     });
 
-    if (code && child.stdin) {
-      child.stdin.write(code);
+    // Write input to stdin if provided
+    if (child.stdin) {
+      if (code) {
+        child.stdin.write(code);
+      }
       child.stdin.end();
     }
   });
@@ -235,22 +238,23 @@ async function executeWithLimits(
 
 export async function executeCode(
   code: string,
-  language: string
+  language: string,
+  input?: string | undefined
 ): Promise<ExecutionResult> {
   const lang = language.toLowerCase();
 
   try {
     switch (lang) {
       case "javascript":
-        return await executeJavaScript(code);
+        return await executeJavaScript(code, input);
       case "python":
-        return await executePython(code);
+        return await executePython(code, input);
       case "java":
-        return await executeJava(code);
+        return await executeJava(code, input);
       case "c":
-        return await executeC(code);
+        return await executeC(code, input);
       case "cpp":
-        return await executeCpp(code);
+        return await executeCpp(code, input);
       default:
         return {
           success: false,
@@ -270,17 +274,26 @@ export async function executeCode(
 }
 
 // ---------------- JavaScript ----------------
-async function executeJavaScript(code: string): Promise<ExecutionResult> {
-  return executeWithLimits("node", ["-e", code]);
+async function executeJavaScript(
+  code: string,
+  input?: string | undefined
+): Promise<ExecutionResult> {
+  return executeWithLimits("node", ["-e", code], input);
 }
 
 // ---------------- Python ----------------
-async function executePython(code: string): Promise<ExecutionResult> {
-  return executeWithLimits("python3", ["-c", code]);
+async function executePython(
+  code: string,
+  input?: string | undefined
+): Promise<ExecutionResult> {
+  return executeWithLimits("python3", ["-c", code], input);
 }
 
 // ---------------- Java ----------------
-async function executeJava(code: string): Promise<ExecutionResult> {
+async function executeJava(
+  code: string,
+  input?: string | undefined
+): Promise<ExecutionResult> {
   const classNameMatch = code.match(/public\s+class\s+([^{\s]+)/);
   const className = classNameMatch?.[1] || "Main";
 
@@ -341,7 +354,7 @@ async function executeJava(code: string): Promise<ExecutionResult> {
         tempDir,
         className,
       ],
-      undefined,
+      input,
       tempDir
     );
 
@@ -365,7 +378,10 @@ async function executeJava(code: string): Promise<ExecutionResult> {
 }
 
 // ---------------- C ----------------
-async function executeC(code: string): Promise<ExecutionResult> {
+async function executeC(
+  code: string,
+  input?: string | undefined
+): Promise<ExecutionResult> {
   const tempDir: string = path.join(__dirname, "../../tmp");
   await mkdir(tempDir, { recursive: true });
 
@@ -413,7 +429,7 @@ async function executeC(code: string): Promise<ExecutionResult> {
     }
 
     // Execute
-    const result = await executeWithLimits(outputFile, []);
+    const result = await executeWithLimits(outputFile, [], input);
 
     // Cleanup
     try {
@@ -435,7 +451,10 @@ async function executeC(code: string): Promise<ExecutionResult> {
 }
 
 // ---------------- C++ ----------------
-async function executeCpp(code: string): Promise<ExecutionResult> {
+async function executeCpp(
+  code: string,
+  input?: string | undefined
+): Promise<ExecutionResult> {
   const tempDir: string = path.join(__dirname, "../../tmp");
   await mkdir(tempDir, { recursive: true });
 
@@ -483,7 +502,7 @@ async function executeCpp(code: string): Promise<ExecutionResult> {
     }
 
     // Execute
-    const result = await executeWithLimits(outputFile, []);
+    const result = await executeWithLimits(outputFile, [], input);
 
     // Cleanup
     try {
@@ -506,9 +525,10 @@ async function executeCpp(code: string): Promise<ExecutionResult> {
 
 export async function validateCode(
   code: string,
-  language: string
+  language: string,
+  input?: string | undefined
 ): Promise<ValidationResult> {
-  const result = await executeCode(code, language);
+  const result = await executeCode(code, language, input);
   return {
     isValid: result.success,
     message: result.message,
