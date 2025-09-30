@@ -1,23 +1,26 @@
-FROM node:20-slim
+FROM node:20-alpine
 
 WORKDIR /app
 
-# Install OpenSSL (needed for Prisma)
-RUN apt-get update -y && apt-get install -y openssl
-
-# Copy package files and install dependencies
+# Copy package files
 COPY package*.json ./
+
+# Install dependencies
 RUN npm install
 
-# Copy backend code
-COPY . .
+# Copy Prisma schema BEFORE generating
+COPY prisma ./prisma
 
-# Generate Prisma client
+# Generate Prisma Client
 RUN npx prisma generate
+
+# Copy rest of the application
+COPY . .
 
 # Build TypeScript
 RUN npm run build
 
-# Expose port and start server
+# Expose port
 EXPOSE 3000
-CMD ["npm", "start"]
+
+CMD ["node", "dist/index.js"]
