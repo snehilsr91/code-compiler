@@ -102,14 +102,12 @@ function createOutputLimiter() {
 async function executeWithLimits(
   command: string,
   args: string[],
-  code?: string | undefined,
-  cwd?: string | undefined
+  stdinInput?: string,
+  cwd?: string
 ): Promise<ExecutionResult> {
   return new Promise((resolve) => {
     const startTime = Date.now();
-    const child: ChildProcess = spawn(command, args, {
-      cwd: cwd || process.cwd(),
-    });
+    const child = spawn(command, args, { cwd: cwd || process.cwd() });
 
     const stdoutLimiter = createOutputLimiter();
     const stderrLimiter = createOutputLimiter();
@@ -117,22 +115,17 @@ async function executeWithLimits(
     let killed = false;
     let timeLimitExceeded = false;
 
-    // Set timeout to kill process
     const timeout = setTimeout(() => {
       timeLimitExceeded = true;
       killed = true;
-      if (child.pid) {
-        child.kill("SIGKILL");
-      }
+      if (child.pid) child.kill("SIGKILL");
     }, EXECUTION_LIMITS.TIME_LIMIT_MS);
 
     if (child.stdout) {
       child.stdout.on("data", (data) => {
         if (!stdoutLimiter.addData(data.toString())) {
           killed = true;
-          if (child.pid) {
-            child.kill("SIGKILL");
-          }
+          if (child.pid) child.kill("SIGKILL");
         }
       });
     }
@@ -143,59 +136,42 @@ async function executeWithLimits(
       });
     }
 
+    // **Write stdin input if provided**
+    if (stdinInput && child.stdin) {
+      child.stdin.write(stdinInput);
+      child.stdin.end();
+    }
+
     child.on("close", (exitCode) => {
       clearTimeout(timeout);
       const executionTime = Date.now() - startTime;
-
       const stdout = stdoutLimiter.getOutput();
       const stderr = stderrLimiter.getOutput();
 
-      // Time Limit Exceeded
       if (timeLimitExceeded) {
         resolve({
           success: false,
           message: "Runtime Error",
-          errors: [
-            "Time Limit Exceeded: Program execution exceeded maximum time limit",
-          ],
+          errors: ["Time Limit Exceeded"],
           executionTime,
           verdict: "TIME_LIMIT_EXCEEDED",
         });
         return;
       }
 
-      // Output Limit Exceeded
       if (stdoutLimiter.isLimitExceeded()) {
         resolve({
           success: false,
           message: "Runtime Error",
           output: stdout,
-          errors: ["Buffer Overflow: Output buffer exceeded maximum capacity"],
+          errors: ["Output Limit Exceeded"],
           executionTime,
           verdict: "OUTPUT_LIMIT_EXCEEDED",
         });
         return;
       }
 
-      // Runtime Error
       if (exitCode !== 0 && !killed) {
-        // Check if it's a memory limit error
-        if (
-          stderr.toLowerCase().includes("memory") ||
-          stderr.toLowerCase().includes("oom")
-        ) {
-          resolve({
-            success: false,
-            message: "Runtime Error",
-            errors: [
-              "Stack Overflow: Memory limit exceeded or stack overflow detected",
-            ],
-            executionTime,
-            verdict: "MEMORY_LIMIT_EXCEEDED",
-          });
-          return;
-        }
-
         resolve({
           success: false,
           message: "Runtime Error",
@@ -206,7 +182,6 @@ async function executeWithLimits(
         return;
       }
 
-      // Accepted
       resolve({
         success: true,
         message: "Accepted",
@@ -225,14 +200,6 @@ async function executeWithLimits(
         verdict: "RUNTIME_ERROR",
       });
     });
-
-    // Write input to stdin if provided
-    if (child.stdin) {
-      if (code) {
-        child.stdin.write(code);
-      }
-      child.stdin.end();
-    }
   });
 }
 
@@ -284,7 +251,7 @@ async function executeJavaScript(
 // ---------------- Python ----------------
 async function executePython(
   code: string,
-  input?: string | undefined
+  input?: string
 ): Promise<ExecutionResult> {
   return executeWithLimits("python3", ["-c", code], input);
 }
