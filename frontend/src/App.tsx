@@ -2,6 +2,8 @@ import { useState } from "react";
 import axios from "axios";
 import CodeEditor from "./components/Editor";
 
+const base_url = import.meta.env.VITE_BASE_URL || "http://localhost:4000";
+
 interface CompilationResult {
   success: boolean;
   message: string;
@@ -58,7 +60,7 @@ function App() {
       setVerdict(null);
 
       const res = await axios.post<CompilationResult>(
-        "http://localhost:4000/api/compile/run",
+        `${base_url}/api/compile/run`,
         {
           code,
           language: language.toUpperCase(),
@@ -93,7 +95,7 @@ function App() {
     try {
       setStatus("Checking compilation...");
       const compileRes = await axios.post<CompilationResult>(
-        "http://localhost:4000/api/compile",
+        `${base_url}/api/compile`,
         {
           code,
           language: language.toUpperCase(),
@@ -111,7 +113,7 @@ function App() {
 
       // If compilation successful, submit
       setStatus("Submitting...");
-      const res = await axios.post("http://localhost:4000/api/submit", {
+      const res = await axios.post(`${base_url}/api/submit`, {
         problemId: 1,
         userId: 1,
         language: language.toUpperCase(),
