@@ -8,13 +8,13 @@ COPY package*.json ./
 # Install dependencies
 RUN npm install
 
-# Copy Prisma schema BEFORE generating
+# Copy Prisma schema
 COPY prisma ./prisma
 
 # Generate Prisma Client
 RUN npx prisma generate
 
-# Copy rest of the application
+# Copy source code
 COPY . .
 
 # Build TypeScript
@@ -23,4 +23,5 @@ RUN npm run build
 # Expose port
 EXPOSE 3000
 
+# Start the application
 CMD ["node", "dist/index.js"]
