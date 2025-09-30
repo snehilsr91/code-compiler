@@ -1,0 +1,46 @@
+services:
+  # PostgreSQL Database
+  - type: pserv
+    name: code-compiler-db
+    env: docker
+    plan: free
+
+  # Redis
+  - type: redis
+    name: code-compiler-redis
+    plan: free
+    maxmemoryPolicy: noeviction
+
+  # Backend API + Worker
+  - type: web
+    name: code-compiler-backend
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: ./backend
+    plan: free
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: code-compiler-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: code-compiler-redis
+          property: connectionString
+      - key: FRONTEND_ORIGIN
+        value: https://your-frontend-url.onrender.com
+      - key: PORT
+        value: 4000
+    healthCheckPath: /api/health
+
+  # Frontend (Optional - if you want to deploy frontend too)
+  - type: web
+    name: code-compiler-frontend
+    env: static
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: ./frontend/dist
+    pullRequestPreviewsEnabled: true
+    envVars:
+      - key: VITE_API_URL
+        value: https://code-compiler-backend.onrender.com
