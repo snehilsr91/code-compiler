@@ -1,16 +1,11 @@
 import { Worker, Job } from "bullmq";
 import prisma from "../prismaClient.js";
 import { SubmissionStatus } from "@prisma/client";
-import { exec } from "child_process";
-import fs from "fs";
-import path from "path";
+import { executeCode } from "../services/codeExecutor.js"; // Fixed path - adjust based on your actual structure
 import IORedis from "ioredis";
 import dotenv from "dotenv";
-import { fileURLToPath } from "url";
 
 dotenv.config();
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const connection = new IORedis(
   process.env.REDIS_URL || "redis://localhost:6379"
@@ -20,78 +15,86 @@ const worker = new Worker(
   "submissions",
   async (job: Job) => {
     const { submissionId, code, language } = job.data;
-    const lang = language.toLowerCase();
 
-    const tempDir = path.join(__dirname, "../../tmp");
-    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+    try {
+      console.log(`Processing submission ${submissionId} for ${language}`);
 
-    let ext = "txt";
-    let dockerImage = "";
-    let compileCmd = "";
-    let runCmd = "";
+      // Execute the code using the codeExecutor service
+      const result = await executeCode(code, language);
 
-    if (lang === "javascript") {
-      ext = "js";
-      dockerImage = "node:20-slim";
-      runCmd = `node /app/${submissionId}.${ext}`;
-    } else if (lang === "python") {
-      ext = "py";
-      dockerImage = "python:3.12-slim";
-      runCmd = `python /app/${submissionId}.${ext}`;
-    } else if (lang === "java") {
-      ext = "java";
-      dockerImage = "openjdk:17";
-      compileCmd = `javac /app/${submissionId}.${ext}`;
-      runCmd = `java -cp /app Main`;
-    } else if (lang === "c") {
-      ext = "c";
-      dockerImage = "gcc:latest";
-      compileCmd = `gcc /app/${submissionId}.${ext} -o /app/${submissionId}`;
-      runCmd = `/app/${submissionId}`;
-    } else if (lang === "cpp") {
-      ext = "cpp";
-      dockerImage = "gcc:latest";
-      compileCmd = `g++ /app/${submissionId}.${ext} -o /app/${submissionId}`;
-      runCmd = `/app/${submissionId}`;
-    }
+      // Map execution result to submission status
+      let status: SubmissionStatus;
+      if (result.success && result.verdict === "ACCEPTED") {
+        status = SubmissionStatus.ACCEPTED;
+      } else if (result.verdict === "TIME_LIMIT_EXCEEDED") {
+        status = SubmissionStatus.TIME_LIMIT_EXCEEDED;
+      } else if (
+        result.verdict === "MEMORY_LIMIT_EXCEEDED" ||
+        result.verdict === "OUTPUT_LIMIT_EXCEEDED"
+      ) {
+        // Map these to RUNTIME_ERROR since they don't exist in your Prisma schema
+        status = SubmissionStatus.RUNTIME_ERROR;
+      } else if (result.verdict === "RUNTIME_ERROR") {
+        status = SubmissionStatus.RUNTIME_ERROR;
+      } else {
+        status = SubmissionStatus.RUNTIME_ERROR;
+      }
 
-    const filePath = path.join(tempDir, `${submissionId}.${ext}`);
-    fs.writeFileSync(filePath, code, "utf8");
+      // Format output with execution details
+      let outputText = "";
+      if (result.output) {
+        outputText += `Output:\n${result.output}\n\n`;
+      }
+      if (result.errors && result.errors.length > 0) {
+        outputText += `Errors:\n${result.errors.join("\n")}\n\n`;
+      }
+      if (result.executionTime !== undefined) {
+        outputText += `Execution Time: ${result.executionTime}ms\n`;
+      }
+      if (result.verdict) {
+        outputText += `Verdict: ${result.verdict}\n`;
+      }
 
-    return new Promise<void>((resolve) => {
-      const dockerCmd = compileCmd
-        ? `docker run --rm -v ${tempDir.replace(
-            /\\/g,
-            "/"
-          )}:/app ${dockerImage} /bin/sh -c "${compileCmd} && ${runCmd}"`
-        : `docker run --rm -v ${tempDir.replace(
-            /\\/g,
-            "/"
-          )}:/app ${dockerImage} ${runCmd}`;
-
-      exec(dockerCmd, { timeout: 10000 }, async (error, stdout, stderr) => {
-        let status: SubmissionStatus = SubmissionStatus.ACCEPTED;
-        let output = stdout || "";
-
-        if (error) {
-          status = SubmissionStatus.RUNTIME_ERROR;
-          output = stderr || error.message;
-        }
-
-        await prisma.submission.update({
-          where: { id: submissionId },
-          data: { status, code: `${code}\n\n// Output:\n${output}` },
-        });
-
-        fs.existsSync(filePath) && fs.unlinkSync(filePath);
-        resolve();
+      // Update submission in database
+      await prisma.submission.update({
+        where: { id: submissionId },
+        data: {
+          status,
+          code: `${code}\n\n// ${result.message}\n${outputText}`,
+        },
       });
-    });
+
+      console.log(
+        `Submission ${submissionId} completed with status: ${status}`
+      );
+    } catch (error: any) {
+      console.error(`Submission ${submissionId} failed:`, error);
+
+      // Update submission with error status
+      await prisma.submission.update({
+        where: { id: submissionId },
+        data: {
+          status: SubmissionStatus.RUNTIME_ERROR,
+          code: `${code}\n\n// Error: ${error.message}`,
+        },
+      });
+    }
   },
   { connection }
 );
 
-worker.on("completed", (job) => console.log(`Submission ${job.id} completed`));
-worker.on("failed", (job, err) =>
-  console.error(`Submission ${job?.id} failed`, err)
-);
+worker.on("completed", (job) => {
+  console.log(`✓ Job ${job.id} completed successfully`);
+});
+
+worker.on("failed", (job, err) => {
+  console.error(`✗ Job ${job?.id} failed:`, err.message);
+});
+
+worker.on("error", (err) => {
+  console.error("Worker error:", err);
+});
+
+console.log("Submission worker started and waiting for jobs...");
+
+export default worker;
