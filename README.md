@@ -36,12 +36,96 @@ This is a **code compiler for coding competitions** with a microservices archite
 - **Execution containers** for Node.js and Python runtimes
 - **Docker Compose** setup for Redis and PostgreSQL services
 
-## Development Commands
+## 🚀 Quick Start (Automated)
+
+### One-Command Startup
+
+The easiest way to start the entire project:
+
+```bash
+./start.sh
+```
+
+This will automatically:
+- ✅ Start Docker services (PostgreSQL, Redis)
+- ✅ Install dependencies for backend and frontend
+- ✅ Run database migrations
+- ✅ Start backend server with worker
+- ✅ Start frontend development server
+- ✅ Create comprehensive log files
+- ✅ Monitor all services
+
+### Quick Commands
+
+```bash
+# Start all services
+./start.sh
+
+# Stop all services
+./stop.sh
+
+# Monitor services and view logs
+./monitor.sh
+```
+
+### Log Files
+
+All logs are stored in the `logs/` directory with timestamps:
+- `logs/main_YYYYMMDD_HHMMSS.log` - Main startup log
+- `logs/backend_YYYYMMDD_HHMMSS.log` - Backend server logs
+- `logs/frontend_YYYYMMDD_HHMMSS.log` - Frontend dev server logs
+- `logs/docker_YYYYMMDD_HHMMSS.log` - Docker services logs
+- `logs/error_YYYYMMDD_HHMMSS.log` - Error logs only
+
+View logs in real-time:
+```bash
+# View latest backend logs
+tail -f logs/backend_*.log
+
+# View latest error logs
+tail -f logs/error_*.log
+
+# Use the monitor script for interactive log viewing
+./monitor.sh
+```
+
+---
+
+## 🛠️ Manual Setup (Advanced)
+
+### Environment Setup
+
+1. **Create environment files:**
+
+```bash
+# Backend
+cp backend/.env.example backend/.env
+# Edit backend/.env with your database credentials
+
+# Frontend
+cp frontend/.env.example frontend/.env
+# Edit frontend/.env if needed
+```
+
+2. **Configure environment variables:**
+
+Backend `.env` file:
+```env
+DATABASE_URL="postgresql://postgres:password@localhost:5432/code_compiler"
+REDIS_URL="redis://localhost:6379"
+PORT=4000
+FRONTEND_ORIGIN="http://localhost:5173"
+```
+
+Frontend `.env` file:
+```env
+VITE_BASE_URL="http://localhost:4000"
+```
 
 ### Database Operations
-```powershell
-# Navigate to db directory
-cd db
+```bash
+# Navigate to backend directory
+cd backend
 
 # Install dependencies
 npm install
@@ -63,7 +147,7 @@ npx prisma migrate dev --name migration_name
 ```
 
 ### Backend Development
-```powershell
+```bash
 # Navigate to backend directory
 cd backend
 
@@ -81,7 +165,7 @@ npx tsc
 ```
 
 ### Frontend Development
-```powershell
+```bash
 # Navigate to frontend directory
 cd frontend
 
@@ -102,9 +186,9 @@ npm run lint
 ```
 
 ### Docker Services
-```powershell
-# Navigate to docker directory
-cd docker
+```bash
+# Navigate to backend directory
+cd backend
 
 # Start all services (Redis, PostgreSQL)
 docker-compose up -d
@@ -119,25 +203,26 @@ docker-compose logs
 docker-compose up -d --build
 ```
 
-### Full Application Setup
-```powershell
+### Manual Full Application Setup
+```bash
 # 1. Start Docker services
-cd docker
+cd backend
 docker-compose up -d
 
 # 2. Setup database
-cd ../db
 npm install
 npx prisma migrate deploy
 npx prisma generate
 
-# 3. Start backend
-cd ../backend
-npm install
+# 3. Start backend (in first terminal)
 npm run dev
 
-# 4. Start frontend (in new terminal)
-cd ../frontend
+# 4. Start worker (in second terminal)
+cd backend
+node --loader ts-node/esm src/workers/submissionWorker.ts
+
+# 5. Start frontend (in third terminal)
+cd frontend
 npm install
 npm run dev
 ```
@@ -172,6 +257,135 @@ npm run dev
 - ✅ Backend API with submission endpoint  
 - ✅ Database schema and migrations
 - ✅ Queue setup with Redis
-- ⚠️ **Missing**: Worker implementation for code execution
-- ⚠️ **Missing**: Docker container execution logic
+- ✅ Worker implementation for code execution
+- ✅ Automated startup and logging system
+- ⚠️ **Missing**: Docker container execution logic (currently runs on host)
 - ⚠️ **Missing**: Test case evaluation system
+- ⚠️ **Security**: Code execution needs sandboxing
+
+## 📝 Service URLs
+
+After starting the project with `./start.sh`:
+
+- **Frontend**: http://localhost:5173
+- **Backend API**: http://localhost:4000
+- **Health Check**: http://localhost:4000/api/health
+- **PostgreSQL**: localhost:5432
+- **Redis**: localhost:6379
+- **Prisma Studio**: Run `npx prisma studio` in backend folder
+
+## 🔧 Troubleshooting
+
+### Script won't run
+```bash
+# Make scripts executable
+chmod +x start.sh stop.sh monitor.sh
+```
+
+### Port already in use
+```bash
+# Check what's using the port
+lsof -i :5173  # Frontend
+lsof -i :4000  # Backend
+lsof -i :5432  # PostgreSQL
+lsof -i :6379  # Redis
+
+# Kill the process
+kill -9 <PID>
+
+# Or use stop script
+./stop.sh
+```
+
+### Docker services not starting
+```bash
+# Check Docker status
+docker ps
+
+# Check Docker logs
+cd backend
+docker-compose logs
+
+# Restart Docker services
+docker-compose down
+docker-compose up -d
+```
+
+### Database connection errors
+```bash
+# Check if PostgreSQL is running
+nc -z localhost 5432
+
+# Reset database
+cd backend
+npx prisma migrate reset
+
+# Regenerate Prisma client
+npx prisma generate
+```
+
+### Dependencies issues
+```bash
+# Clean install backend
+cd backend
+rm -rf node_modules package-lock.json
+npm install
+
+# Clean install frontend
+cd frontend
+rm -rf node_modules package-lock.json
+npm install
+```
+
+### View specific error logs
+```bash
+# Latest error log
+cat logs/error_*.log | tail -50
+
+# Backend errors
+cat logs/backend_*.log | grep ERROR
+
+# Use monitor script
+./monitor.sh
+```
+
+### Worker not processing jobs
+```bash
+# Check Redis connection
+redis-cli ping
+
+# Check worker logs in backend log file
+tail -f logs/backend_*.log | grep -i worker
+
+# Manually restart worker
+cd backend
+node --loader ts-node/esm src/workers/submissionWorker.ts
+```
+
+## 🎯 Project Management Scripts
+
+| Script | Purpose | Usage |
+|--------|---------|-------|
+| `start.sh` | Start all services with logging | `./start.sh` |
+| `stop.sh` | Stop all services gracefully | `./stop.sh` |
+| `monitor.sh` | Monitor services and view logs | `./monitor.sh` |
+
+### Script Features
+
+**start.sh**:
+- Automatic dependency installation
+- Database migration
+- Service health checks
+- Process monitoring
+- Comprehensive logging
+- Auto-restart for worker
+
+**stop.sh**:
+- Graceful process termination
+- Docker service cleanup
+- PID file management
+
+**monitor.sh**:
+- Real-time service status
+- Interactive log viewing
+- Error log filtering
