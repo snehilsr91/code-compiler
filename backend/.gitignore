@@ -1,10 +1,61 @@
+# Dependencies
 node_modules
-.env
 
-#testing files
+# Environment variables
+.env
+.env.local
+.env.production
+
+# Testing files
 seed-test-data.js
 test-basic.js
 test-health.js
 test-submit.js
 
+# Temporary execution files
 tmp/
+*.tmp
+
+# Compiled Java files
+*.class
+java-runner/*.class
+
+# Compiled C/C++ files
+*.o
+*.out
+*.exe
+a.out
+
+# TypeScript build output
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Prisma
+prisma/migrations/
+!prisma/migrations/.gitkeep
+
+# Optional: Keep the migrations folder structure but ignore migration files
+# prisma/migrations/*
+# !prisma/migrations/.gitkeep
+
+# Debug files
+.pnp.*
+.yarn/
+
+# OS files
+Thumbs.db
+desktop.ini

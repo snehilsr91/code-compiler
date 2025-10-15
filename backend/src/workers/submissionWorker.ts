@@ -22,17 +22,19 @@ const worker = new Worker(
       // Execute the code using the codeExecutor service
       const result = await executeCode(code, language, input);
 
-      // Map execution result to submission status
+      // Find the verdict mapping section and add:
       let status: SubmissionStatus;
       if (result.success && result.verdict === "ACCEPTED") {
         status = SubmissionStatus.ACCEPTED;
       } else if (result.verdict === "TIME_LIMIT_EXCEEDED") {
         status = SubmissionStatus.TIME_LIMIT_EXCEEDED;
+      } else if (result.verdict === "COMPILATION_ERROR") {
+        // ← Add this
+        status = SubmissionStatus.COMPILATION_ERROR; // ← Add this
       } else if (
         result.verdict === "MEMORY_LIMIT_EXCEEDED" ||
         result.verdict === "OUTPUT_LIMIT_EXCEEDED"
       ) {
-        // Map these to RUNTIME_ERROR since they don't exist in your Prisma schema
         status = SubmissionStatus.RUNTIME_ERROR;
       } else if (result.verdict === "RUNTIME_ERROR") {
         status = SubmissionStatus.RUNTIME_ERROR;

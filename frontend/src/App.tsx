@@ -10,6 +10,7 @@ interface CompilationResult {
   errors?: string[];
   output?: string;
   executionTime?: number;
+  compileTime?: number;
   memoryUsed?: number;
   verdict?: "ACCEPTED" | "RUNTIME_ERROR";
 }
@@ -22,7 +23,6 @@ const STARTER_CODE: Record<string, string> = {
   cpp: '#include <iostream>\nusing namespace std;\nint main() {\n    cout << "Hello World" << endl;\n    return 0;\n}',
 };
 
-// Verdict color mapping
 const VERDICT_STYLES: Record<
   string,
   { bg: string; text: string; border: string }
@@ -48,6 +48,7 @@ function App() {
   const [compilationErrors, setCompilationErrors] = useState<string[]>([]);
   const [output, setOutput] = useState<string>("");
   const [executionTime, setExecutionTime] = useState<number | null>(null);
+  const [compileTime, setCompileTime] = useState<number | null>(null);
   const [verdict, setVerdict] = useState<string | null>(null);
   const [status, setStatus] = useState("");
 
@@ -57,6 +58,7 @@ function App() {
       setCompilationErrors([]);
       setOutput("");
       setExecutionTime(null);
+      setCompileTime(null);
       setVerdict(null);
 
       const res = await axios.post<CompilationResult>(
@@ -71,12 +73,14 @@ function App() {
         setCompilationStatus("success");
         setOutput(res.data.output || "");
         setExecutionTime(res.data.executionTime || null);
+        setCompileTime(res.data.compileTime || null);
         setVerdict(res.data.verdict || "ACCEPTED");
       } else {
         setCompilationStatus("error");
         setCompilationErrors(res.data.errors || [res.data.message]);
         setVerdict(res.data.verdict || "RUNTIME_ERROR");
         setExecutionTime(res.data.executionTime || null);
+        setCompileTime(res.data.compileTime || null);
         if (res.data.output) {
           setOutput(res.data.output);
         }
@@ -91,7 +95,6 @@ function App() {
   };
 
   const handleSubmit = async () => {
-    // First check if code compiles
     try {
       setStatus("Checking compilation...");
       const compileRes = await axios.post<CompilationResult>(
@@ -111,7 +114,6 @@ function App() {
         return;
       }
 
-      // If compilation successful, submit
       setStatus("Submitting...");
       const res = await axios.post(`${base_url}/api/submit`, {
         problemId: 1,
@@ -129,6 +131,9 @@ function App() {
     ? VERDICT_STYLES[verdict]
     : VERDICT_STYLES.ACCEPTED;
 
+  // Check if language is compiled (C/C++)
+  const isCompiledLanguage = language === "c" || language === "cpp";
+
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto">
@@ -142,7 +147,6 @@ function App() {
         </div>
 
         <div className="grid grid-cols-1 gap-6">
-          {/* Editor Section */}
           <div className="bg-white rounded-lg shadow-sm p-6">
             <div className="mb-4">
               <label className="block text-sm font-semibold mb-2 text-gray-700">
@@ -160,6 +164,7 @@ function App() {
                   setOutput("");
                   setVerdict(null);
                   setExecutionTime(null);
+                  setCompileTime(null);
                 }}
               >
                 {Object.keys(STARTER_CODE).map((lang) => (
@@ -228,18 +233,51 @@ function App() {
                     {verdict.replace(/_/g, " ")}
                   </span>
                 </div>
-                {executionTime !== null && (
-                  <div className="text-sm text-gray-600 mt-2">
-                    Execution Time:{" "}
-                    <span className="font-semibold">{executionTime}ms</span>
-                  </div>
-                )}
+
+                <div className="space-y-1 text-sm text-gray-600 mt-3">
+                  {isCompiledLanguage && compileTime !== null && (
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">⚙️ Compile Time:</span>
+                      <span
+                        className={
+                          compileTime < 100
+                            ? "text-green-600 font-semibold"
+                            : "font-semibold"
+                        }
+                      >
+                        {compileTime}ms
+                      </span>
+                      {compileTime < 10 && (
+                        <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">
+                          CACHED ⚡
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {executionTime !== null && (
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">⏱️ Execution Time:</span>
+                      <span className="font-semibold">{executionTime}ms</span>
+                    </div>
+                  )}
+
+                  {isCompiledLanguage &&
+                    compileTime !== null &&
+                    executionTime !== null && (
+                      <div className="flex items-center gap-2 pt-1 border-t border-gray-200">
+                        <span className="font-medium">📊 Total Time:</span>
+                        <span className="font-semibold">
+                          {compileTime + executionTime}ms
+                        </span>
+                      </div>
+                    )}
+                </div>
               </div>
             )}
           </div>
         </div>
 
-        {/* Output Section */}
         {compilationStatus === "success" && output && (
           <div className="mt-6 bg-white rounded-lg shadow-sm p-6">
             <div className="flex items-center justify-between mb-3">
@@ -254,7 +292,6 @@ function App() {
           </div>
         )}
 
-        {/* Error Section */}
         {compilationStatus === "error" && compilationErrors.length > 0 && (
           <div className="mt-6 bg-white rounded-lg shadow-sm p-6">
             <h3 className="text-lg font-semibold mb-3 text-red-600 flex items-center gap-2">
@@ -283,7 +320,6 @@ function App() {
           </div>
         )}
 
-        {/* Status Message */}
         {status && (
           <div className="mt-6 bg-white rounded-lg shadow-sm p-4">
             <div className="flex items-center gap-2 text-gray-700">

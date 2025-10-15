@@ -23,8 +23,15 @@ COPY prisma ./prisma
 # Generate Prisma Client
 RUN npx prisma generate
 
-# Copy source code
+# Copy source code (including java-runner directory)
 COPY . .
+
+# Compile JavaRunner
+RUN javac java-runner/JavaRunner.java
+
+# Verify JavaRunner compilation
+RUN ls -la java-runner/ && \
+    test -f java-runner/JavaRunner.class || (echo "JavaRunner.class not found!" && exit 1)
 
 # Build TypeScript
 RUN npm run build
