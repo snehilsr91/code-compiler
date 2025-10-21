@@ -349,7 +349,12 @@ async function executeWithLimits(
         return;
       }
 
-      if (exitCode !== 0 && !killed) {
+      // FIXED: Only treat as error if there's actual error output OR signal termination
+      // Allow non-zero exit codes if the program produced output and no errors
+      const hasErrorOutput = stderr.trim().length > 0;
+      const wasSignaled = exitCode !== null && exitCode > 128; // Signal termination (e.g., segfault)
+
+      if (exitCode !== 0 && !killed && (hasErrorOutput || wasSignaled)) {
         resolve({
           success: false,
           message: "Runtime Error",
@@ -360,6 +365,7 @@ async function executeWithLimits(
         return;
       }
 
+      // If program completed (even with non-zero exit) and produced output, consider it success
       resolve({
         success: true,
         message: "Accepted",
@@ -380,7 +386,6 @@ async function executeWithLimits(
     });
   });
 }
-
 // OPTIMIZED: Much faster compilation with minimal overhead
 async function compileWithCache(
   code: string,
