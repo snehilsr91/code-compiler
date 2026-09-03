@@ -13,6 +13,16 @@ const writeFile = promisify(fs.writeFile);
 const unlink = promisify(fs.unlink);
 const access = promisify(fs.access);
 
+async function safeUnlink(filePath: string): Promise<void> {
+  try {
+    await unlink(filePath);
+  } catch {
+    try {
+      await unlink(`${filePath}.exe`);
+    } catch {}
+  }
+}
+
 export const LANGUAGES = {
   JAVASCRIPT: "javascript",
   PYTHON: "python",
@@ -50,13 +60,13 @@ export interface ExecutionResult {
 interface CacheEntry {
   binaryPath: string;
   timestamp: number;
-  hits: number; // Track usage frequency
+  hits: number;
 }
 
 const compilationCache = new Map<string, CacheEntry>();
-const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes (increased from 5)
-const MAX_CACHE_SIZE = 500; // Increased from 100
-const MIN_HITS_TO_KEEP = 2; // Keep frequently used binaries longer
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const MAX_CACHE_SIZE = 500;
+const MIN_HITS_TO_KEEP = 2;
 
 // Clean up old cache entries with smarter eviction
 function cleanupCache() {
@@ -64,7 +74,6 @@ function cleanupCache() {
   const entriesToDelete: string[] = [];
 
   for (const [hash, entry] of compilationCache.entries()) {
-    // Keep frequently used entries longer
     const effectiveTTL =
       entry.hits >= MIN_HITS_TO_KEEP ? CACHE_TTL_MS * 2 : CACHE_TTL_MS;
 
@@ -76,7 +85,6 @@ function cleanupCache() {
 
   entriesToDelete.forEach((hash) => compilationCache.delete(hash));
 
-  // If cache is still too large, remove least frequently used entries
   if (compilationCache.size > MAX_CACHE_SIZE) {
     const sorted = Array.from(compilationCache.entries()).sort(
       (a, b) => a[1].hits - b[1].hits || a[1].timestamp - b[1].timestamp
@@ -89,7 +97,39 @@ function cleanupCache() {
   }
 }
 
+// Cleanup orphaned temp files
+function cleanupOrphanedTempFiles() {
+  const tempDir = path.join(__dirname, "../../tmp");
+
+  fs.readdir(tempDir, (err, files) => {
+    if (err) return;
+
+    const now = Date.now();
+    const maxAge = 3600000; // 1 hour
+
+    files.forEach((file) => {
+      const filePath = path.join(tempDir, file);
+      fs.stat(filePath, (err, stats) => {
+        if (err) return;
+
+        if (now - stats.mtimeMs > maxAge) {
+          const isInCache = Array.from(compilationCache.values()).some(
+            (entry) => entry.binaryPath === filePath
+          );
+
+          if (!isInCache) {
+            fs.unlink(filePath, () => {
+              console.log(`Cleaned up orphaned temp file: ${file}`);
+            });
+          }
+        }
+      });
+    });
+  });
+}
+
 setInterval(cleanupCache, 60000);
+setInterval(cleanupOrphanedTempFiles, 600000); // Every 10 minutes
 
 function hashCode(code: string): string {
   return crypto
@@ -118,7 +158,6 @@ async function startJavaRunner() {
       "-Xms64m",
       "-Xmx256m",
       "-XX:+UseSerialGC",
-      "-XX:+UseStringDeduplication",
       "-cp",
       javaRunnerPath,
       "JavaRunner",
@@ -169,45 +208,69 @@ async function executeJavaPersistent(
 
       let outputBuffer = "";
       let errorBuffer = "";
+      let resultParsed = false;
 
       const dataHandler = (data: Buffer) => {
         const chunk = data.toString();
         outputBuffer += chunk;
 
-        if (outputBuffer.includes("\n")) {
-          clearTimeout(timeout);
-          javaRunnerProcess?.stdout?.removeListener("data", dataHandler);
-          javaRunnerProcess?.stderr?.removeListener("data", errorHandler);
+        // Process all complete lines
+        const lines = outputBuffer.split("\n");
 
-          const jsonLine = outputBuffer.trim();
+        // Keep the last incomplete line in the buffer
+        outputBuffer = lines.pop() || "";
+
+        // Try to parse each complete line as JSON
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          if (!trimmedLine || resultParsed) continue;
+
+          // Skip JVM warnings and other non-JSON output
+          if (trimmedLine.startsWith("[") && trimmedLine.includes("][")) {
+            // This is a JVM log line like [0.020s][warning][stringdedup]
+            console.log("[Java] Skipping JVM log:", trimmedLine);
+            continue;
+          }
 
           try {
-            const result = JSON.parse(jsonLine);
+            const result = JSON.parse(trimmedLine);
 
-            resolve({
-              success: result.success,
-              message: result.verdict || "Execution completed",
-              output: result.output,
-              errors: result.errors ? [result.errors] : undefined,
-              executionTime: result.executionTime,
-              verdict:
-                result.verdict ||
-                (result.success ? "ACCEPTED" : "RUNTIME_ERROR"),
-            });
+            // Validate that this is actually our result object
+            if (typeof result === "object" && "success" in result) {
+              resultParsed = true;
+              clearTimeout(timeout);
+              javaRunnerProcess?.stdout?.removeListener("data", dataHandler);
+              javaRunnerProcess?.stderr?.removeListener("data", errorHandler);
+
+              resolve({
+                success: result.success,
+                message: result.verdict || "Execution completed",
+                output: result.output,
+                errors: result.errors ? [result.errors] : undefined,
+                executionTime: result.executionTime,
+                verdict:
+                  result.verdict ||
+                  (result.success ? "ACCEPTED" : "RUNTIME_ERROR"),
+              });
+              return;
+            }
           } catch (e) {
-            console.error("[Java] Failed to parse JSON:", e);
-            resolve({
-              success: false,
-              message: "Invalid response from JavaRunner",
-              errors: [`Parse error: ${jsonLine}`],
-              verdict: "RUNTIME_ERROR",
-            });
+            // Not JSON or invalid JSON - skip this line
+            console.log(
+              "[Java] Skipping non-JSON line:",
+              trimmedLine.substring(0, 100)
+            );
+            continue;
           }
         }
       };
 
       const errorHandler = (data: Buffer) => {
         errorBuffer += data.toString();
+        // Log stderr but don't treat JVM warnings as errors
+        if (!errorBuffer.includes("String Deduplication")) {
+          console.error("[Java stderr]", data.toString());
+        }
       };
 
       javaRunnerProcess?.stdout?.on("data", dataHandler);
@@ -350,22 +413,22 @@ async function executeWithLimits(
       }
 
       // FIXED: Only treat as error if there's actual error output OR signal termination
-      // Allow non-zero exit codes if the program produced output and no errors
       const hasErrorOutput = stderr.trim().length > 0;
-      const wasSignaled = exitCode !== null && exitCode > 128; // Signal termination (e.g., segfault)
+      const wasSignaled = exitCode !== null && exitCode > 128;
 
       if (exitCode !== 0 && !killed && (hasErrorOutput || wasSignaled)) {
+        const errContent = stderr.trim() || "Program terminated with errors";
+        const isSyntax = errContent.includes("SyntaxError");
         resolve({
           success: false,
-          message: "Runtime Error",
-          errors: [stderr.trim() || "Program terminated with errors"],
+          message: isSyntax ? "Compilation Error" : "Runtime Error",
+          errors: [errContent],
           executionTime,
-          verdict: "RUNTIME_ERROR",
+          verdict: isSyntax ? "COMPILATION_ERROR" : "RUNTIME_ERROR",
         });
         return;
       }
 
-      // If program completed (even with non-zero exit) and produced output, consider it success
       resolve({
         success: true,
         message: "Accepted",
@@ -386,7 +449,7 @@ async function executeWithLimits(
     });
   });
 }
-// OPTIMIZED: Much faster compilation with minimal overhead
+
 async function compileWithCache(
   code: string,
   language: "c" | "cpp",
@@ -411,7 +474,6 @@ async function compileWithCache(
       await access(cached.binaryPath, fs.constants.X_OK);
       const cacheHitTime = Date.now() - compileStartTime;
       console.log(`[${language.toUpperCase()}] Cache hit! (${cacheHitTime}ms)`);
-      // Update cache metadata
       cached.timestamp = Date.now();
       cached.hits += 1;
       return {
@@ -434,21 +496,16 @@ async function compileWithCache(
       success: boolean;
       error?: string;
     }>((resolve) => {
-      // OPTIMIZED FLAGS FOR SPEED:
-      // -O0: No optimization (fastest compile)
-      // -pipe: Use pipes instead of temp files
-      // -fno-diagnostics-color: Faster output processing
       const baseFlags = [
         sourceFile,
         "-o",
         outputFile,
-        "-O0", // Changed from -O2 - no optimization for instant compile
+        "-O0",
         "-pipe",
         "-fno-diagnostics-color",
-        "-w", // Suppress warnings for faster compilation
+        "-w",
       ];
 
-      // Add language-specific flags
       const flags =
         language === "cpp" ? [...baseFlags, "-std=c++17"] : [...baseFlags];
 
@@ -496,7 +553,6 @@ async function compileWithCache(
 
     const actualCompileTime = Date.now() - compileStartTime;
 
-    // Add to cache with initial metadata
     compilationCache.set(cacheKey, {
       binaryPath: outputFile,
       timestamp: Date.now(),
@@ -593,6 +649,18 @@ async function executeCCached(
     [],
     input
   );
+
+  // Clean up binary immediately after execution
+  try {
+    const codeHash = hashCode(code);
+    const cacheKey = `c-${codeHash}`;
+    compilationCache.delete(cacheKey);
+    await safeUnlink(compileResult.binaryPath!);
+    console.log(`[C] Cleaned up binary: ${compileResult.binaryPath}`);
+  } catch (e) {
+    console.error("[C] Failed to delete binary:", e);
+  }
+
   return {
     ...execResult,
     compileTime: compileResult.compileTime,
@@ -620,6 +688,18 @@ async function executeCppCached(
     [],
     input
   );
+
+  // Clean up binary immediately after execution
+  try {
+    const codeHash = hashCode(code);
+    const cacheKey = `cpp-${codeHash}`;
+    compilationCache.delete(cacheKey);
+    await safeUnlink(compileResult.binaryPath!);
+    console.log(`[CPP] Cleaned up binary: ${compileResult.binaryPath}`);
+  } catch (e) {
+    console.error("[CPP] Failed to delete binary:", e);
+  }
+
   return {
     ...execResult,
     compileTime: compileResult.compileTime,
@@ -654,4 +734,90 @@ export async function validateCode(
     message: result.message,
     ...(result.errors !== undefined && { errors: result.errors }),
   };
+}
+
+/**
+ * Executes code against multiple test cases efficiently.
+ * - C/C++: compile once, run N times, then delete binary.
+ * - Java: runs through persistent JavaRunner; short-circuits on COMPILATION_ERROR.
+ * - Python/JS: runs each test case independently; short-circuits on COMPILATION_ERROR.
+ */
+export async function executeCodeBatch(
+  code: string,
+  language: string,
+  testcases: string[]
+): Promise<ExecutionResult[]> {
+  if (testcases.length === 0) return [];
+
+  const lang = language.toLowerCase();
+
+  // ── Compiled languages: C / C++ ──────────────────────────────────────────
+  if (lang === "c" || lang === "cpp") {
+    const compiler = lang === "cpp" ? "g++" : "gcc";
+    const ext = lang === "cpp" ? "cpp" : "c";
+    const compileResult = await compileWithCache(
+      code,
+      lang as "c" | "cpp",
+      compiler,
+      ext
+    );
+
+    if (!compileResult.success) {
+      // Short-circuit: propagate COMPILATION_ERROR to every test case
+      return testcases.map(() => ({
+        success: false,
+        message: "Compilation Error",
+        errors: [compileResult.error || "Compilation failed"],
+        verdict: "COMPILATION_ERROR" as const,
+        compileTime: compileResult.compileTime,
+      }));
+    }
+
+    // Run each test case against the same binary
+    const results: ExecutionResult[] = [];
+    for (const input of testcases) {
+      const result = await executeWithLimits(
+        compileResult.binaryPath!,
+        [],
+        input
+      );
+      results.push({ ...result, compileTime: compileResult.compileTime });
+    }
+
+    // Clean up binary after all runs are done
+    try {
+      const codeHash = hashCode(code);
+      const cacheKey = `${lang}-${codeHash}`;
+      compilationCache.delete(cacheKey);
+      await safeUnlink(compileResult.binaryPath!);
+      console.log(`[${lang.toUpperCase()}] Batch: cleaned up binary`);
+    } catch (e) {
+      console.error(`[${lang.toUpperCase()}] Batch: failed to delete binary`, e);
+    }
+
+    return results;
+  }
+
+  // ── Interpreted / JVM languages: Java, Python, JS ───────────────────────
+  // Run test cases sequentially and short-circuit on COMPILATION_ERROR.
+  const results: ExecutionResult[] = [];
+  let compilationError: ExecutionResult | null = null;
+
+  for (const input of testcases) {
+    if (compilationError) {
+      // Reuse the same error without re-executing
+      results.push(compilationError);
+      continue;
+    }
+
+    const result = await executeCode(code, language, input);
+
+    if (result.verdict === "COMPILATION_ERROR") {
+      compilationError = result;
+    }
+
+    results.push(result);
+  }
+
+  return results;
 }

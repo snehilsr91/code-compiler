@@ -109,22 +109,37 @@ public class JavaRunner {
     }
     
     private static String extractClassName(String code) {
-        // First, try to find the class containing main method
-        String mainClassPattern = "class\\s+([A-Za-z_$][A-Za-z0-9_$]*)\\s*\\{[^}]*public\\s+static\\s+void\\s+main";
-        String mainClass = extractPattern(code, mainClassPattern);
-        if (mainClass != null) {
-            System.err.println("Found main method in class: " + mainClass);
-            return mainClass;
+        // Strategy: locate "public static void main" in the source, then find the
+        // nearest class declaration that appears BEFORE that position.
+        // This is robust to any nesting depth — no brace-counting needed.
+        java.util.regex.Pattern mainPattern = java.util.regex.Pattern.compile(
+            "public\\s+static\\s+void\\s+main");
+        java.util.regex.Matcher mainMatcher = mainPattern.matcher(code);
+
+        if (mainMatcher.find()) {
+            int mainPos = mainMatcher.start();
+            // Scan everything before the main method for class declarations
+            java.util.regex.Pattern classPattern = java.util.regex.Pattern.compile(
+                "class\\s+([A-Za-z_$][A-Za-z0-9_$]*)");
+            java.util.regex.Matcher classMatcher = classPattern.matcher(code.substring(0, mainPos));
+            String lastClassBeforeMain = null;
+            while (classMatcher.find()) {
+                lastClassBeforeMain = classMatcher.group(1);
+            }
+            if (lastClassBeforeMain != null) {
+                System.err.println("Found class containing main: " + lastClassBeforeMain);
+                return lastClassBeforeMain;
+            }
         }
-        
-        // Fallback: look for public class
+
+        // Fallback 1: any public class
         String publicMatch = extractPattern(code, "public\\s+class\\s+([A-Za-z_$][A-Za-z0-9_$]*)");
         if (publicMatch != null) {
             System.err.println("Found public class: " + publicMatch);
             return publicMatch;
         }
-        
-        // Last resort: any class
+
+        // Fallback 2: any class at all
         String anyMatch = extractPattern(code, "class\\s+([A-Za-z_$][A-Za-z0-9_$]*)");
         System.err.println("Found class: " + (anyMatch != null ? anyMatch : "Main"));
         return anyMatch != null ? anyMatch : "Main";

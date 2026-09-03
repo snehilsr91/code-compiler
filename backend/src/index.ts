@@ -3,6 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import submitRouter from "./routes/submit.js";
 import compileRouter from "./routes/compile.js";
+import runRouter from "./routes/run.js";
 
 dotenv.config();
 
@@ -22,6 +23,7 @@ app.get("/api/health", (req, res) => {
 
 app.use("/api/submit", submitRouter);
 app.use("/api/compile", compileRouter);
+app.use("/api/run", runRouter);
 
 app.listen(PORT, () => {
   console.log(`Backend running on port ${PORT}`);
