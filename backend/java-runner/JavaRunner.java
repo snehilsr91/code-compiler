@@ -111,7 +111,7 @@ public class JavaRunner {
     private static String extractClassName(String code) {
         // Strategy: locate "public static void main" in the source, then find the
         // nearest class declaration that appears BEFORE that position.
-        // This is robust to any nesting depth — no brace-counting needed.
+        // This is robust to any nesting depth -- no brace-counting needed.
         java.util.regex.Pattern mainPattern = java.util.regex.Pattern.compile(
             "public\\s+static\\s+void\\s+main");
         java.util.regex.Matcher mainMatcher = mainPattern.matcher(code);

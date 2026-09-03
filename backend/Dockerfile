@@ -27,7 +27,7 @@ RUN npx prisma generate
 COPY . .
 
 # Compile JavaRunner
-RUN javac java-runner/JavaRunner.java
+RUN javac -encoding UTF-8 java-runner/JavaRunner.java
 
 # Verify JavaRunner compilation
 RUN ls -la java-runner/ && \
