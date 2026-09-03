@@ -142,44 +142,74 @@ function hashCode(code: string): string {
 // Persistent JavaRunner process
 let javaRunnerProcess: ChildProcess | null = null;
 let javaRunnerReady = false;
+let javaRunnerStartingPromise: Promise<void> | null = null;
 
-async function startJavaRunner() {
+async function startJavaRunner(): Promise<void> {
   if (javaRunnerProcess && javaRunnerReady) {
     return;
   }
+  if (javaRunnerStartingPromise) {
+    return javaRunnerStartingPromise;
+  }
 
-  const javaRunnerPath = path.join(__dirname, "../../java-runner");
+  javaRunnerStartingPromise = new Promise<void>((resolve, reject) => {
+    const javaRunnerPath = path.join(__dirname, "../../java-runner");
 
-  javaRunnerProcess = spawn(
-    "java",
-    [
-      "-XX:+TieredCompilation",
-      "-XX:TieredStopAtLevel=1",
-      "-Xms64m",
-      "-Xmx256m",
-      "-XX:+UseSerialGC",
-      "-cp",
-      javaRunnerPath,
-      "JavaRunner",
-    ],
-    {
-      stdio: ["pipe", "pipe", "pipe"],
-    }
-  );
+    javaRunnerProcess = spawn(
+      "java",
+      [
+        "-XX:+TieredCompilation",
+        "-XX:TieredStopAtLevel=1",
+        "-Xms64m",
+        "-Xmx256m",
+        "-XX:+UseSerialGC",
+        "-cp",
+        javaRunnerPath,
+        "JavaRunner",
+      ],
+      {
+        stdio: ["pipe", "pipe", "pipe"],
+      }
+    );
 
-  javaRunnerReady = true;
+    let started = false;
+    const startTimeout = setTimeout(() => {
+      if (!started) {
+        console.log("[JavaRunner] Startup ready fallback after timeout");
+        javaRunnerReady = true;
+        resolve();
+      }
+    }, 15000);
 
-  javaRunnerProcess.stderr?.on("data", (data) => {
-    console.log("[JavaRunner]", data.toString());
+    javaRunnerProcess.stderr?.on("data", (data) => {
+      const msg = data.toString();
+      console.log("[JavaRunner]", msg);
+      if (!started && msg.includes("JavaRunner service started and ready")) {
+        started = true;
+        clearTimeout(startTimeout);
+        javaRunnerReady = true;
+        resolve();
+      }
+    });
+
+    javaRunnerProcess.on("close", () => {
+      console.log("JavaRunner process closed");
+      javaRunnerReady = false;
+      javaRunnerProcess = null;
+    });
+
+    javaRunnerProcess.on("error", (err) => {
+      console.error("JavaRunner spawn error:", err);
+      javaRunnerReady = false;
+      javaRunnerProcess = null;
+      clearTimeout(startTimeout);
+      reject(err);
+    });
+  }).finally(() => {
+    javaRunnerStartingPromise = null;
   });
 
-  javaRunnerProcess.on("close", () => {
-    console.log("JavaRunner process closed");
-    javaRunnerReady = false;
-    javaRunnerProcess = null;
-  });
-
-  await new Promise((resolve) => setTimeout(resolve, 500));
+  return javaRunnerStartingPromise;
 }
 
 async function executeJavaPersistent(
@@ -198,6 +228,13 @@ async function executeJavaPersistent(
         console.error("[Java] Timeout - no response from JavaRunner");
         javaRunnerProcess?.stdout?.removeListener("data", dataHandler);
         javaRunnerProcess?.stderr?.removeListener("data", errorHandler);
+        if (javaRunnerProcess) {
+          try {
+            javaRunnerProcess.kill("SIGKILL");
+          } catch {}
+          javaRunnerProcess = null;
+          javaRunnerReady = false;
+        }
         resolve({
           success: false,
           message: "Execution timeout",
